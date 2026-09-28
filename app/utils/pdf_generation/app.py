@@ -1,37 +1,56 @@
 import os, datetime
 from pathlib import Path
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from . import filters
 from playwright.sync_api import sync_playwright
 from ...models.EmailContent import EmailContent
 import extensions
 from app.utils.translate import translate_jp_to_en
 import json
+from flask import render_template as flask_render_template
+
 
 def render_template(html_template, data):
     template_dir = Path(__file__).parent / "templates"
-    env = Environment(loader=FileSystemLoader(template_dir))
-    env.filters['comma'] = filters.comma_format
+    env = Environment(
+        loader=FileSystemLoader(template_dir),
+        autoescape=select_autoescape(
+            enabled_extensions=("html", "htm", "xml"),
+            default_for_string=True,
+        ),
+    )
+    env.filters["comma"] = filters.comma_format
     template = env.get_template(html_template)
-    
+
     return template.render(data)
+
 
 def generate_confirmation_pdf(output_path, parsed_email_content: EmailContent):
     print("browser", extensions.browser)
     page = extensions.browser.new_page()
     try:
         start_date, end_date = None, None
-        
+
         try:
-            start_date = datetime.datetime.strptime(parsed_email_content.start_date, "%Y-%m-%d")
-            end_date = datetime.datetime.strptime(parsed_email_content.end_date, "%Y-%m-%d")
-            
-            issue_number = str(start_date.year) + " / " + start_date.strftime("%m%d") + "-" + end_date.strftime("%m%d")
-           
+            start_date = datetime.datetime.strptime(
+                parsed_email_content.start_date, "%Y-%m-%d"
+            )
+            end_date = datetime.datetime.strptime(
+                parsed_email_content.end_date, "%Y-%m-%d"
+            )
+
+            issue_number = (
+                str(start_date.year)
+                + " / "
+                + start_date.strftime("%m%d")
+                + "-"
+                + end_date.strftime("%m%d")
+            )
+
         except Exception as e:
             print(f"Error parsing dates: {e}")
             issue_number = "N/A"
-        
+
         generated_date = datetime.datetime.now().strftime("%Y / %m%d")
         content_injected = {
             "name": parsed_email_content.customer_name,
@@ -40,31 +59,33 @@ def generate_confirmation_pdf(output_path, parsed_email_content: EmailContent):
             "month": start_date.strftime("%b").upper() if start_date else "N/A",
             "passenger_count": parsed_email_content.total_pax,
             "operator": parsed_email_content.operator_name,
-            "plans": '<br/>'.join(parsed_email_content.iternary),
+            "plans": "<br/>".join(parsed_email_content.iternary),
             "requests": parsed_email_content.requests,
-            "remarks": [
-                "some remarks",
-                "some more remarks"
-            ],
+            "remarks": ["some remarks", "some more remarks"],
             "vehicle_type": parsed_email_content.vehicle_type,
             "staff_assignment": parsed_email_content.staff_assignment,
             "total_fee": parsed_email_content.total_fee,
-            "payment_method": parsed_email_content.payment_method if parsed_email_content.payment_method else "N/A",
-            "taxi_charter_option": parsed_email_content.taxi_charter_option if parsed_email_content.taxi_charter_option else "N/A",
+            "payment_method": (
+                parsed_email_content.payment_method
+                if parsed_email_content.payment_method
+                else "N/A"
+            ),
+            "taxi_charter_option": (
+                parsed_email_content.taxi_charter_option
+                if parsed_email_content.taxi_charter_option
+                else "N/A"
+            ),
         }
-        
+
         content = render_template("template_confirmation.html", content_injected)
         page.set_content(content)
-        page.pdf(path=output_path, 
-                format='A4', 
-                print_background=True, 
-                display_header_footer=False,
-                margin={
-                    "top": "8mm",
-                    "bottom": "8mm",
-                    "left": "8mm",
-                    "right": "8mm"
-                })
+        page.pdf(
+            path=output_path,
+            format="A4",
+            print_background=True,
+            display_header_footer=False,
+            margin={"top": "8mm", "bottom": "8mm", "left": "8mm", "right": "8mm"},
+        )
     except Exception as e:
         print(f"Error generating PDF: {e}")
     finally:
@@ -76,38 +97,43 @@ def generate_driver_plan_pdf(output_path, parsed_email_content: EmailContent):
     page = extensions.browser.new_page()
     try:
         # Translate itinerary and requests from Japanese to English
-        data = json.dumps({
-            "itinerary": parsed_email_content.iternary,
-            "requests": parsed_email_content.requests
-        }, ensure_ascii=False)
+        data = json.dumps(
+            {
+                "itinerary": parsed_email_content.iternary,
+                "requests": parsed_email_content.requests,
+            },
+            ensure_ascii=False,
+        )
         translated_data = translate_jp_to_en(data)
-        
+
         content_injected = {
             "customer_name": parsed_email_content.customer_name,
             "num_of_pax": parsed_email_content.total_pax,
             "vehicle_type": parsed_email_content.vehicle_type,
             "total_price": parsed_email_content.total_fee,
-            "itinerary": translated_data.get("itinerary", []) if translated_data else [],
-            "requests": translated_data.get("requests", []) if translated_data else []
+            "itinerary": (
+                translated_data.get("itinerary", []) if translated_data else []
+            ),
+            "requests": translated_data.get("requests", []) if translated_data else [],
         }
         content = render_template("driver_plan.template.html", content_injected)
         page.set_content(content)
-        page.pdf(path=output_path,
-                format='A4', 
-                print_background=True, 
-                display_header_footer=False,
-                margin={
-                    "top": "8mm",
-                    "bottom": "8mm",
-                    "left": "8mm",
-                    "right": "8mm"
-                })
+        page.pdf(
+            path=output_path,
+            format="A4",
+            print_background=True,
+            display_header_footer=False,
+            margin={"top": "8mm", "bottom": "8mm", "left": "8mm", "right": "8mm"},
+        )
     except Exception as e:
         print(f"Error generating PDF: {e}")
     finally:
         page.close()
 
-def save_pdfs(file_name: str, parsed_email_content: EmailContent, out_path: str) -> tuple[str, str]:
+
+def save_pdfs(
+    file_name: str, parsed_email_content: EmailContent, out_path: str
+) -> tuple[str, str]:
     """Generate and save Confirmation and Driver Plan PDFs based on the parsed email content.
 
     Args:
@@ -120,16 +146,16 @@ def save_pdfs(file_name: str, parsed_email_content: EmailContent, out_path: str)
     """
     confirmation_output_path = os.path.join(out_path, f"{file_name}.pdf")
     driver_plan_output_path = os.path.join(out_path, f"{file_name}_driver_plan.pdf")
-    
+
     if not os.path.exists(out_path):
         os.makedirs(out_path)
-        
+
     print(f"Generating Confirmation PDF at: {confirmation_output_path}")
     generate_confirmation_pdf(confirmation_output_path, parsed_email_content)
     print(f"Confirmation PDF generated and saved at: {confirmation_output_path}")
-    
+
     print(f"Generating Driver Plan PDF at: {driver_plan_output_path}")
     generate_driver_plan_pdf(driver_plan_output_path, parsed_email_content)
     print(f"Driver Plan PDF generated and saved at: {driver_plan_output_path}")
-    
+
     return confirmation_output_path, driver_plan_output_path
