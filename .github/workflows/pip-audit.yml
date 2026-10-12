@@ -3,7 +3,7 @@ name: Pip Audit Security Scan
 on:
   push:
     branches:
-      - Akshana
+      - AkshanaAK
   pull_request:
     branches:
       - main
